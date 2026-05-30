@@ -1,8 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Bash(New-Item -ItemType Directory -Force \"c:\\\\Users\\\\dg660\\\\Documents\\\\MATERIAS\\\\DESARROLLO PARA DISPOSITIVOS INTELIGENTES\\\\nuevo proyecto\\\\climate_app\\\\.vscode\")",
-      "Bash(Out-Null)"
-    ]
-  }
-}
