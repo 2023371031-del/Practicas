@@ -77,29 +77,43 @@ keytool -genkey -v -keystore climate_app.jks -keyalg RSA -keysize 2048 -validity
 ```
 
 - Archivo: `android/app/climate_app.jks`
-- Password: `[guardada en lugar seguro]`
+- Password: guardada en lugar seguro
 
 ### 3.2 Configuracion Gradle
 
-Firma configurada en `android/app/build.gradle.kts`:
+Las contraseñas se almacenan en `android/key.properties` (excluido de Git):
+
+```properties
+keyPassword=<password_del_keystore>
+storePassword=<password_del_keystore>
+```
+
+Firma configurada en `android/app/build.gradle.kts` leyendo desde el archivo de propiedades:
 
 ```kotlin
+import java.util.Properties
+import java.io.FileInputStream
+
+val keyProps = Properties()
+val keyFile = rootProject.file("key.properties")
+if (keyFile.exists()) {
+    keyProps.load(FileInputStream(keyFile))
+}
+
+// Dentro de signingConfigs:
 signingConfigs {
     create("release") {
         keyAlias = "climate_key"
-        keyPassword = System.getenv("KEY_PASSWORD") ?: "MiContrasenaSegura2025!"
+        keyPassword = keyProps.getProperty("keyPassword") ?: ""
         storeFile = file("climate_app.jks")
-        storePassword = System.getenv("STORE_PASSWORD") ?: "MiContrasenaSegura2025!"
-    }
-}
-buildTypes {
-    release {
-        signingConfig = signingConfigs.getByName("release")
-        isMinifyEnabled = true
-        isShrinkResources = true
+        storePassword = keyProps.getProperty("storePassword") ?: ""
     }
 }
 ```
+
+- `key.properties` esta en `.gitignore` (nunca se sube al repositorio)
+- Si el archivo no existe, el build falla con valores vacios (no hay fallback inseguro)
+- Sin `key.properties` no se puede generar un APK release
 
 ### 3.3 APK Generado
 
