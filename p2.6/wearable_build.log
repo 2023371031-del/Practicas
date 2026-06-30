@@ -1,0 +1,25 @@
+Launching lib\main.dart on sdk gwear x86 64 in debug mode...
+Running Gradle task 'assembleDebug'...                             12.4s
+√ Built build\app\outputs\flutter-apk\app-debug.apk
+Installing build\app\outputs\flutter-apk\app-debug.apk...           7.3s
+I/FlutterActivityAndFragmentDelegate( 5959): If you are attempting to set --enable-dart-profiling via Intent extras to launch a Flutter component outside of using the Flutter CLI, note that support for setting engine flags on Android via Intent will soon be dropped; see https://github.com/flutter/flutter/issues/180686 for more information on this breaking change. To migrate, set --enable-dart-profiling or any other flags specified via Intent extras on the command line instead or see https://github.com/flutter/flutter/blob/main/docs/engine/Flutter-Android-Engine-Flags.md for alternative methods.
+D/FlutterJNI( 5959): Beginning load of flutter...
+D/FlutterJNI( 5959): flutter (null) was loaded normally!
+I/flutter ( 5959): [IMPORTANT:flutter/shell/platform/android/android_context_gl_impeller.cc(104)] Using the Impeller rendering backend (OpenGLES).
+D/FlutterRenderer( 5959): Width is zero. 0,0
+Syncing files to device sdk gwear x86 64...                        371ms
+
+Flutter run key commands.
+r Hot reload. 
+R Hot restart.
+h List all available interactive commands.
+d Detach (terminate "flutter run" but leave application running).
+c Clear the screen
+q Quit (terminate the application on the device).
+
+A Dart VM Service on sdk gwear x86 64 is available at: http://127.0.0.1:60915/iff06DognKg=/
+The Flutter DevTools debugger and profiler on sdk gwear x86 64 is available at: http://127.0.0.1:60915/iff06DognKg=/devtools/?uri=ws://127.0.0.1:60915/iff06DognKg=/ws
+W/le.wearable_app( 5959): Suspending all threads took: 16.937ms
+I/le.wearable_app( 5959): Background concurrent mark compact GC freed 1170KB AllocSpace bytes, 3(60KB) LOS objects, 49% free, 2663KB/5327KB, paused 54.891ms,113.059ms total 754.789ms
+I/Choreographer( 5959): Skipped 1178 frames!  The application may be doing too much work on its main thread.
+Lost connection to device.
