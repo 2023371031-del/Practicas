@@ -50,6 +50,23 @@ class BleGattServer(private val context: Context) {
             Log.d(TAG, "onCharacteristicReadRequest: $characteristic")
             gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, offset, characteristic?.value)
         }
+
+        // Responder al CCCD write cuando el telefono llama setNotifyValue(true)
+        override fun onDescriptorWriteRequest(
+            device: BluetoothDevice?,
+            requestId: Int,
+            descriptor: BluetoothGattDescriptor?,
+            preparedWrite: Boolean,
+            responseNeeded: Boolean,
+            offset: Int,
+            value: ByteArray?
+        ) {
+            descriptor?.value = value
+            if (responseNeeded) {
+                gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, 0, null)
+            }
+            Log.d(TAG, "CCCD write: ${descriptor?.uuid} responseNeeded=$responseNeeded")
+        }
     }
 
     var onConnectionChange: ((Boolean) -> Unit)? = null

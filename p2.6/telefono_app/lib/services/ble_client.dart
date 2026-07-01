@@ -2,10 +2,15 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 import 'dart:typed_data';
+import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import '../ble_constants.dart';
 import '../models/activity_data.dart';
 
 class BleClient {
+  BluetoothDevice? _device;
+  final List<StreamSubscription> _subs = [];
+  Timer? _simTimer;
+
   final _dataCtrl = StreamController<ActivityData>.broadcast();
   Stream<ActivityData> get dataStream => _dataCtrl.stream;
 
@@ -14,85 +19,92 @@ class BleClient {
 
   ActivityData _current = ActivityData(
     steps: 0,
-    heartRate: 72,
+    heartRate: 0,
     calories: 0,
-    status: 'reposo',
+    status: 'sin datos',
     timestamp: DateTime.now(),
   );
 
-  // Estado interno del simulador (replica el SensorSimulator del wearable)
-  final _random = Random();
-  Timer? _simTimer;
-  int _simSteps = 0;
-  double _simCalories = 0;
-  int _simHeartRate = 72;
-  String _simStatus = 'reposo';
-  int _simTick = 0;
-
-  // Escaneo simulado: espera 2 s como si buscara el wearable, luego conecta
   Future<void> scanAndConnect() async {
-    print('[BleClient] Iniciando escaneo...');
-    await Future.delayed(const Duration(seconds: 2));
+    print('[BleClient] Iniciando escaneo BLE...');
+    bool found = false;
 
+    try {
+      final completer = Completer<BluetoothDevice>();
+
+      final scanSub = FlutterBluePlus.scanResults.listen((results) {
+        for (final r in results) {
+          final uuids = r.advertisementData.serviceUuids
+              .map((u) => u.toString().toLowerCase());
+          if (uuids.contains(BleConstants.serviceUUID.toLowerCase())) {
+            if (!completer.isCompleted) {
+              print('[BleClient] Wearable encontrado: ${r.device.platformName}');
+              completer.complete(r.device);
+            }
+          }
+        }
+      });
+
+      await FlutterBluePlus.startScan(timeout: const Duration(seconds: 5));
+
+      try {
+        _device = await completer.future.timeout(
+          const Duration(seconds: 6),
+          onTimeout: () => throw Exception('no encontrado'),
+        );
+        found = true;
+      } finally {
+        await FlutterBluePlus.stopScan();
+        scanSub.cancel();
+      }
+    } catch (_) {
+      found = false;
+    }
+
+    if (found) {
+      await _connect();
+    } else {
+      print('[BleClient] Wearable no encontrado — iniciando simulación BLE');
+      _startSimulation();
+    }
+  }
+
+  Future<void> _connect() async {
+    await _device!.connect();
     _connected = true;
-    print('[BleClient] Conectado al wearable (simulado para emulador)');
+    print('[BleClient] Conectado a ${_device!.platformName}');
 
-    _startSimulation();
-  }
-
-  // Genera datos con el mismo algoritmo que el SensorSimulator del wearable
-  // y los pasa por _handleValue como si llegaran via BLE NOTIFY.
-  void _startSimulation() {
-    _simTimer = Timer.periodic(const Duration(seconds: 1), (_) {
-      _simTick++;
-
-      if (_simTick % 30 == 0) {
-        const activities = ['reposo', 'caminando', 'corriendo'];
-        _simStatus = activities[_random.nextInt(activities.length)];
+    _device!.connectionState.listen((state) {
+      if (state == BluetoothConnectionState.disconnected) {
+        _connected = false;
+        print('[BleClient] Desconectado');
       }
-
-      switch (_simStatus) {
-        case 'caminando':
-          _simSteps += _random.nextInt(2) + 1;
-          break;
-        case 'corriendo':
-          _simSteps += _random.nextInt(4) + 3;
-          break;
-        default:
-          break;
-      }
-
-      final target = _simStatus == 'corriendo'
-          ? 145
-          : _simStatus == 'caminando'
-              ? 95
-              : 72;
-      _simHeartRate += (_random.nextInt(7) - 3);
-      _simHeartRate = _simHeartRate.clamp(target - 10, target + 10);
-      _simCalories += _simSteps * 0.00004;
-
-      // Pasar los datos por el mismo canal que usaria BLE real
-      _handleValue(BleConstants.stepsUUID.toLowerCase(),
-          _intToBytes(_simSteps));
-      _handleValue(BleConstants.heartRateUUID.toLowerCase(),
-          [_simHeartRate]);
-      _handleValue(BleConstants.caloriesUUID.toLowerCase(),
-          _int16ToBytes(_simCalories.toInt()));
-      _handleValue(BleConstants.statusUUID.toLowerCase(),
-          utf8.encode(_simStatus));
     });
+
+    await _discoverAndSubscribe();
   }
 
-  List<int> _intToBytes(int value) {
-    final data = ByteData(4);
-    data.setInt32(0, value, Endian.little);
-    return data.buffer.asUint8List().toList();
-  }
+  Future<void> _discoverAndSubscribe() async {
+    final services = await _device!.discoverServices();
+    for (final svc in services) {
+      if (svc.uuid.toString().toLowerCase() !=
+          BleConstants.serviceUUID.toLowerCase()) continue;
 
-  List<int> _int16ToBytes(int value) {
-    final data = ByteData(2);
-    data.setInt16(0, value, Endian.little);
-    return data.buffer.asUint8List().toList();
+      print('[BleClient] Servicio de actividad encontrado');
+      for (final char in svc.characteristics) {
+        final uuid = char.uuid.toString().toLowerCase();
+
+        if (char.properties.notify) {
+          await char.setNotifyValue(true);
+          print('[BleClient] NOTIFY activado: $uuid');
+        }
+
+        final sub = char.lastValueStream.listen((bytes) {
+          _handleValue(uuid, bytes);
+        });
+        _subs.add(sub);
+      }
+    }
   }
 
   void _handleValue(String uuid, List<int> bytes) {
@@ -115,9 +127,64 @@ class BleClient {
     }
   }
 
+  // Simula los datos que vendrian del reloj via BLE NOTIFY
+  void _startSimulation() {
+    _connected = true;
+    final rng = Random();
+    int steps = 0;
+    int calories = 0;
+    final statuses = ['reposo', 'caminando', 'corriendo'];
+    int statusIdx = 0;
+    int tick = 0;
+
+    _simTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      tick++;
+      // Cambiar actividad cada 20 segundos
+      if (tick % 20 == 0) statusIdx = (statusIdx + 1) % statuses.length;
+      final status = statuses[statusIdx];
+
+      int bpm;
+      int stepDelta;
+      int calDelta;
+      switch (status) {
+        case 'corriendo':
+          bpm = 130 + rng.nextInt(30);
+          stepDelta = 3 + rng.nextInt(2);
+          calDelta = 2;
+          break;
+        case 'caminando':
+          bpm = 90 + rng.nextInt(20);
+          stepDelta = 1 + rng.nextInt(2);
+          calDelta = 1;
+          break;
+        default:
+          bpm = 65 + rng.nextInt(15);
+          stepDelta = 0;
+          calDelta = 0;
+      }
+
+      steps += stepDelta;
+      calories += calDelta;
+
+      _current = ActivityData(
+        steps: steps,
+        heartRate: bpm,
+        calories: calories,
+        status: status,
+        timestamp: DateTime.now(),
+      );
+      _dataCtrl.add(_current);
+    });
+  }
+
   Future<void> disconnect() async {
     _simTimer?.cancel();
     _simTimer = null;
+    for (final s in _subs) {
+      await s.cancel();
+    }
+    _subs.clear();
+    await _device?.disconnect();
     _connected = false;
   }
 

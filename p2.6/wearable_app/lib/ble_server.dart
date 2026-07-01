@@ -1,12 +1,15 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
-import 'package:flutter_blue_plus/flutter_blue_plus.dart';
+import 'package:ble_peripheral/ble_peripheral.dart';
 import 'ble_constants.dart';
 import 'sensor_simulator.dart';
 
 class BleServer {
   final SensorSimulator simulator;
   bool _advertising = false;
+  String? _connectedDeviceId;
+  final List<StreamSubscription> _subs = [];
 
   BleServer(this.simulator);
 
@@ -26,31 +29,93 @@ class BleServer {
 
   Future<void> startAdvertising() async {
     try {
-      final state = await FlutterBluePlus.adapterState.first;
-      if (state != BluetoothAdapterState.on) {
-        throw Exception('Bluetooth desactivado. Actívalo en el emulador.');
-      }
+      // Inicializar el modo periférico BLE
+      await BlePeripheral.initialize();
 
-      // flutter_blue_plus en modo servidor (peripheral) es limitado en
-      // emuladores. Los datos fluyen por los streams del simulador.
+      // Registrar el servicio GATT con las 4 características
+      await BlePeripheral.addService(
+        BleService(
+          uuid: BleConstants.serviceUUID,
+          primary: true,
+          characteristics: [
+            BleCharacteristic(
+              uuid: BleConstants.stepsUUID,
+              properties: [
+                CharacteristicProperties.read.index,
+                CharacteristicProperties.notify.index,
+              ],
+              permissions: [AttributePermissions.readable.index],
+              value: null,
+            ),
+            BleCharacteristic(
+              uuid: BleConstants.heartRateUUID,
+              properties: [
+                CharacteristicProperties.read.index,
+                CharacteristicProperties.notify.index,
+              ],
+              permissions: [AttributePermissions.readable.index],
+              value: null,
+            ),
+            BleCharacteristic(
+              uuid: BleConstants.caloriesUUID,
+              properties: [
+                CharacteristicProperties.read.index,
+                CharacteristicProperties.notify.index,
+              ],
+              permissions: [AttributePermissions.readable.index],
+              value: null,
+            ),
+            BleCharacteristic(
+              uuid: BleConstants.statusUUID,
+              properties: [
+                CharacteristicProperties.read.index,
+                CharacteristicProperties.notify.index,
+              ],
+              permissions: [AttributePermissions.readable.index],
+              value: null,
+            ),
+          ],
+        ),
+      );
+
+      // Escuchar conexiones del teléfono
+      BlePeripheral.setConnectionStateChangeCallback(
+        (String deviceId, bool connected) {
+          if (connected) {
+            _connectedDeviceId = deviceId;
+            print('[BleServer] Teléfono conectado: $deviceId');
+          } else {
+            _connectedDeviceId = null;
+            print('[BleServer] Teléfono desconectado');
+          }
+        },
+      );
+
+      // Iniciar advertising con el UUID del servicio
+      await BlePeripheral.startAdvertising(
+        services: [BleConstants.serviceUUID],
+        localName: 'WearOS',
+      );
+
       _advertising = true;
-      print('[BleServer] Iniciado. Esperando conexiones...');
+      print('[BleServer] Advertising iniciado. Esperando conexión del teléfono...');
 
-      simulator.stepsStream.listen((steps) {
-        _notifyCharacteristic(BleConstants.stepsUUID, _intToBytes(steps));
-      });
-      simulator.heartRateStream.listen((bpm) {
-        _notifyCharacteristic(
-            BleConstants.heartRateUUID, Uint8List.fromList([bpm]));
-      });
-      simulator.caloriesStream.listen((cal) {
-        _notifyCharacteristic(BleConstants.caloriesUUID, _int16ToBytes(cal));
-      });
-      simulator.statusStream.listen((status) {
-        _notifyCharacteristic(
-            BleConstants.statusUUID,
-            Uint8List.fromList(utf8.encode(status)));
-      });
+      // Suscribirse a los streams del simulador y enviar NOTIFY al teléfono
+      _subs.add(simulator.stepsStream.listen(
+        (steps) => _notify(BleConstants.stepsUUID, _intToBytes(steps)),
+      ));
+      _subs.add(simulator.heartRateStream.listen(
+        (bpm) => _notify(BleConstants.heartRateUUID, Uint8List.fromList([bpm])),
+      ));
+      _subs.add(simulator.caloriesStream.listen(
+        (cal) => _notify(BleConstants.caloriesUUID, _int16ToBytes(cal)),
+      ));
+      _subs.add(simulator.statusStream.listen(
+        (status) => _notify(
+          BleConstants.statusUUID,
+          Uint8List.fromList(utf8.encode(status)),
+        ),
+      ));
     } catch (e) {
       _advertising = false;
       print('[BleServer] Error: $e');
@@ -58,15 +123,24 @@ class BleServer {
     }
   }
 
-  void _notifyCharacteristic(String uuid, Uint8List data) {
-    // En un servidor GATT real, aqui se enviaria la notificacion BLE.
-    // En emulador los datos no se transmiten via BLE; el teléfono
-    // usa el modo demo para simular la recepción.
-    print('[BleServer] NOTIFY $uuid: $data');
+  void _notify(String uuid, Uint8List value) {
+    final deviceId = _connectedDeviceId;
+    if (deviceId == null) return;
+    BlePeripheral.updateCharacteristic(
+      characteristicId: uuid,
+      value: value,
+      deviceId: deviceId,
+    ).catchError((e) => print('[BleServer] Error NOTIFY $uuid: $e'));
   }
 
   void stop() {
     _advertising = false;
+    for (final s in _subs) {
+      s.cancel();
+    }
+    _subs.clear();
+    _connectedDeviceId = null;
+    BlePeripheral.stopAdvertising();
     simulator.stop();
   }
 }
