@@ -1,0 +1,7 @@
+.env
+js/weather.js
+node_modules/
+*.jks
+*.keystore
+.DS_Store
+Thumbs.db
